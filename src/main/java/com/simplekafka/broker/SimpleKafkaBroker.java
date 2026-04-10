@@ -36,6 +36,7 @@ public class SimpleKafkaBroker {
             ByteBuffer buffer = ByteBuffer.allocate(1024);
 
             while (client.isOpen()) {
+
                 buffer.clear();
                 int bytesRead = client.read(buffer);
 
@@ -45,38 +46,90 @@ public class SimpleKafkaBroker {
                 }
 
                 buffer.flip();
-
                 byte messageType = buffer.get();
 
-                // 🔥 PRODUCE
+                // ================= PRODUCE =================
                 if (messageType == Protocol.PRODUCE) {
+
+                    short topicLength = buffer.getShort();
+                    byte[] topicBytes = new byte[topicLength];
+                    buffer.get(topicBytes);
+                    String topic = new String(topicBytes);
+
+                    int partitionId = buffer.getInt();
+
+                    PartitionMetadata metadata = getMetadata(partitionId);
+
+                    // ONLY LEADER ACCEPTS
+                    if (metadata.leader != brokerId) {
+                        client.write(Protocol.encodeError("Not leader"));
+                        continue;
+                    }
+
+                    int msgLen = buffer.getInt();
+                    byte[] message = new byte[msgLen];
+                    buffer.get(message);
+
+                    Partition partition = partitionManager.getPartition(partitionId);
+                    long offset = partition.append(message);
+
+                    System.out.println("Leader stored message at offset " + offset);
+
+                    // 🔥 REPLICATION
+                    for (int follower : metadata.followers) {
+
+                        new Thread(() -> {
+                            try {
+                                SocketChannel followerSocket = SocketChannel.open();
+                                followerSocket.connect(
+                                        new InetSocketAddress("localhost", 9092 + follower)
+                                );
+
+                                ByteBuffer replicateRequest =
+                                        Protocol.encodeReplicateRequest(
+                                                topic,
+                                                partitionId,
+                                                offset,
+                                                message
+                                        );
+
+                                followerSocket.write(replicateRequest);
+                                followerSocket.close();
+
+                                System.out.println("Replicated to broker " + follower);
+
+                            } catch (Exception e) {
+                                System.out.println("Replication failed to broker " + follower);
+                            }
+                        }).start();
+                    }
+
+                    client.write(Protocol.encodeProduceResponse(offset));
+                }
+
+                // ================= REPLICATE =================
+                else if (messageType == Protocol.REPLICATE) {
 
                     short topicLength = buffer.getShort();
                     byte[] topicBytes = new byte[topicLength];
                     buffer.get(topicBytes);
 
                     int partitionId = buffer.getInt();
+                    long offset = buffer.getLong();
 
-                    // 🔥 CHECK OWNERSHIP
-                    if (getBrokerForPartition(partitionId) != brokerId) {
-                        client.write(Protocol.encodeError("Wrong broker"));
-                        continue;
-                    }
-
-                    int messageLength = buffer.getInt();
-                    byte[] message = new byte[messageLength];
+                    int msgLen = buffer.getInt();
+                    byte[] message = new byte[msgLen];
                     buffer.get(message);
 
                     Partition partition = partitionManager.getPartition(partitionId);
-                    long offset = partition.append(message);
+                    partition.append(message);
 
-                    System.out.println("Broker " + brokerId +
-                            " stored message in partition " + partitionId);
+                    System.out.println("Follower replicated message at offset " + offset);
 
                     client.write(Protocol.encodeProduceResponse(offset));
                 }
 
-                // 🔥 FETCH
+                // ================= FETCH =================
                 else if (messageType == Protocol.FETCH) {
 
                     short topicLength = buffer.getShort();
@@ -85,12 +138,7 @@ public class SimpleKafkaBroker {
 
                     int partitionId = buffer.getInt();
 
-                    if (getBrokerForPartition(partitionId) != brokerId) {
-                        client.write(Protocol.encodeError("Wrong broker"));
-                        continue;
-                    }
-
-                    buffer.getLong(); // ignore offset
+                    buffer.getLong(); // ignore client offset
                     int maxMessages = buffer.getInt();
 
                     short groupLen = buffer.getShort();
@@ -127,8 +175,16 @@ public class SimpleKafkaBroker {
         }
     }
 
-    // 🔥 PARTITION → BROKER MAPPING
-    private static int getBrokerForPartition(int partitionId) {
-        return partitionId % 3;
+    // 🔥 METADATA
+    private static PartitionMetadata getMetadata(int partitionId) {
+
+        int leader = partitionId % 3;
+
+        List<Integer> followers = List.of(
+                (leader + 1) % 3,
+                (leader + 2) % 3
+        );
+
+        return new PartitionMetadata(leader, followers);
     }
 }
