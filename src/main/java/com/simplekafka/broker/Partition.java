@@ -1,8 +1,8 @@
 package com.simplekafka.broker;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class Partition {
@@ -17,17 +17,42 @@ public class Partition {
         this.logFile = new File(dir, topic + ".log");
     }
 
+    // 🔥 WRITE
     public synchronized long append(byte[] message) throws IOException {
         try (FileOutputStream fos = new FileOutputStream(logFile, true)) {
 
-            // Write message length
             fos.write(intToBytes(message.length));
-
-            // Write message
             fos.write(message);
         }
 
         return offset.getAndIncrement();
+    }
+
+    // 🔥 READ FROM OFFSET
+    public synchronized List<byte[]> readFromOffset(long startOffset, int maxMessages) throws IOException {
+        List<byte[]> result = new ArrayList<>();
+
+        if (!logFile.exists()) return result;
+
+        try (DataInputStream dis = new DataInputStream(new FileInputStream(logFile))) {
+
+            long currentOffset = 0;
+
+            while (dis.available() > 0 && result.size() < maxMessages) {
+
+                int length = dis.readInt();
+                byte[] message = new byte[length];
+                dis.readFully(message);
+
+                if (currentOffset >= startOffset) {
+                    result.add(message);
+                }
+
+                currentOffset++;
+            }
+        }
+
+        return result;
     }
 
     private byte[] intToBytes(int value) {
