@@ -18,7 +18,7 @@ public class TestClient {
         ByteBuffer request = Protocol.encodeProduceRequest(
                 "test",
                 0,
-                "hello kafka".getBytes()
+                "arya dominates systems".getBytes()
         );
 
         socket.write(request);
