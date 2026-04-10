@@ -20,6 +20,10 @@ public class SimpleKafkaBroker {
         int port = Integer.parseInt(args[0]);
         int brokerId = Integer.parseInt(args[1]);
 
+        // Register broker + assign leaders
+        ClusterManager.registerBroker(brokerId);
+        ClusterManager.assignLeaders(3);
+
         ServerSocketChannel server = ServerSocketChannel.open();
         server.bind(new InetSocketAddress(port));
 
@@ -58,10 +62,9 @@ public class SimpleKafkaBroker {
 
                     int partitionId = buffer.getInt();
 
-                    PartitionMetadata metadata = getMetadata(partitionId);
+                    int leader = ClusterManager.getLeader(partitionId);
 
-                    // ONLY LEADER ACCEPTS
-                    if (metadata.leader != brokerId) {
+                    if (leader != brokerId) {
                         client.write(Protocol.encodeError("Not leader"));
                         continue;
                     }
@@ -73,10 +76,18 @@ public class SimpleKafkaBroker {
                     Partition partition = partitionManager.getPartition(partitionId);
                     long offset = partition.append(message);
 
-                    System.out.println("Leader stored message at offset " + offset);
+                    System.out.println("Leader " + brokerId +
+                            " stored message at offset " + offset);
 
-                    // 🔥 REPLICATION
-                    for (int follower : metadata.followers) {
+                    // Followers = all except leader
+                    List<Integer> followers =
+                            ClusterManager.getActiveBrokers()
+                                    .stream()
+                                    .filter(id -> id != brokerId)
+                                    .toList();
+
+                    // Replication
+                    for (int follower : followers) {
 
                         new Thread(() -> {
                             try {
@@ -124,7 +135,8 @@ public class SimpleKafkaBroker {
                     Partition partition = partitionManager.getPartition(partitionId);
                     partition.append(message);
 
-                    System.out.println("Follower replicated message at offset " + offset);
+                    System.out.println("Follower " + brokerId +
+                            " replicated message at offset " + offset);
 
                     client.write(Protocol.encodeProduceResponse(offset));
                 }
@@ -173,18 +185,5 @@ public class SimpleKafkaBroker {
         } catch (Exception e) {
             e.printStackTrace();
         }
-    }
-
-    // 🔥 METADATA
-    private static PartitionMetadata getMetadata(int partitionId) {
-
-        int leader = partitionId % 3;
-
-        List<Integer> followers = List.of(
-                (leader + 1) % 3,
-                (leader + 2) % 3
-        );
-
-        return new PartitionMetadata(leader, followers);
     }
 }
