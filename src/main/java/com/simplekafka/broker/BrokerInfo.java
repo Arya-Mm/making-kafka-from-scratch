@@ -27,4 +27,18 @@ public class BrokerInfo {
     public String toString() {
         return "BrokerInfo{id=" + id + ", host='" + host + "', port=" + port + "}";
     }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+
+        BrokerInfo other = (BrokerInfo) obj;
+        return id == other.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return Integer.hashCode(id);
+    }
 }

@@ -12,27 +12,25 @@ public class Protocol {
     public static final byte PRODUCE = 0x01;
     public static final byte FETCH = 0x02;
     public static final byte METADATA = 0x03;
+    public static final byte CREATE_TOPIC = 0x04;
 
     // Responses
     public static final byte PRODUCE_RESPONSE = 0x11;
     public static final byte FETCH_RESPONSE = 0x12;
     public static final byte ERROR_RESPONSE = 0x13;
 
-
     // =========================
-    // ENCODE METHODS (CLIENT → BROKER)
+    // ENCODE REQUESTS
     // =========================
 
-    // PRODUCE REQUEST
     public static ByteBuffer encodeProduceRequest(String topic, int partition, byte[] message) {
-
         byte[] topicBytes = topic.getBytes();
 
         int size = 1 + 2 + topicBytes.length + 4 + 4 + message.length;
 
         ByteBuffer buffer = ByteBuffer.allocate(size);
 
-        buffer.put(PRODUCE); // type
+        buffer.put(PRODUCE);
         buffer.putShort((short) topicBytes.length);
         buffer.put(topicBytes);
         buffer.putInt(partition);
@@ -43,17 +41,14 @@ public class Protocol {
         return buffer;
     }
 
-
-    // FETCH REQUEST
     public static ByteBuffer encodeFetchRequest(String topic, int partition, long offset, int maxBytes) {
-
         byte[] topicBytes = topic.getBytes();
 
         int size = 1 + 2 + topicBytes.length + 4 + 8 + 4;
 
         ByteBuffer buffer = ByteBuffer.allocate(size);
 
-        buffer.put(FETCH); // type
+        buffer.put(FETCH);
         buffer.putShort((short) topicBytes.length);
         buffer.put(topicBytes);
         buffer.putInt(partition);
@@ -64,14 +59,35 @@ public class Protocol {
         return buffer;
     }
 
+    public static ByteBuffer encodeMetadataRequest() {
+        ByteBuffer buffer = ByteBuffer.allocate(1);
+        buffer.put(METADATA);
+        buffer.flip();
+        return buffer;
+    }
+
+    public static ByteBuffer encodeCreateTopicRequest(String topic, int partitions, short replicationFactor) {
+        byte[] topicBytes = topic.getBytes();
+
+        int size = 1 + 2 + topicBytes.length + 4 + 2;
+
+        ByteBuffer buffer = ByteBuffer.allocate(size);
+
+        buffer.put(CREATE_TOPIC);
+        buffer.putShort((short) topicBytes.length);
+        buffer.put(topicBytes);
+        buffer.putInt(partitions);
+        buffer.putShort(replicationFactor);
+
+        buffer.flip();
+        return buffer;
+    }
 
     // =========================
-    // DECODE METHODS (BROKER → CLIENT)
+    // DECODE RESPONSES
     // =========================
 
-    // PRODUCE RESPONSE
     public static ProduceResult decodeProduceResponse(ByteBuffer buffer) {
-
         byte type = buffer.get();
 
         if (type != PRODUCE_RESPONSE) {
@@ -79,14 +95,10 @@ public class Protocol {
         }
 
         long offset = buffer.getLong();
-
         return new ProduceResult(offset, null);
     }
 
-
-    // FETCH RESPONSE
     public static FetchResult decodeFetchResponse(ByteBuffer buffer) {
-
         byte type = buffer.get();
 
         if (type != FETCH_RESPONSE) {
@@ -94,7 +106,6 @@ public class Protocol {
         }
 
         int count = buffer.getInt();
-
         byte[][] messages = new byte[count][];
 
         for (int i = 0; i < count; i++) {
@@ -107,13 +118,11 @@ public class Protocol {
         return new FetchResult(messages, null);
     }
 
-
     // =========================
-    // ENCODE RESPONSES (BROKER → CLIENT)
+    // ENCODE RESPONSES
     // =========================
 
     public static ByteBuffer encodeProduceResponse(long offset) {
-
         ByteBuffer buffer = ByteBuffer.allocate(1 + 8);
 
         buffer.put(PRODUCE_RESPONSE);
@@ -123,9 +132,7 @@ public class Protocol {
         return buffer;
     }
 
-
     public static ByteBuffer encodeFetchResponse(byte[][] messages) {
-
         int totalSize = 1 + 4;
 
         for (byte[] msg : messages) {
@@ -146,9 +153,7 @@ public class Protocol {
         return buffer;
     }
 
-
     public static ByteBuffer encodeErrorResponse(String errorMessage) {
-
         byte[] errorBytes = errorMessage.getBytes();
 
         ByteBuffer buffer = ByteBuffer.allocate(1 + 4 + errorBytes.length);
@@ -160,7 +165,6 @@ public class Protocol {
         buffer.flip();
         return buffer;
     }
-
 
     // =========================
     // RESULT CLASSES
@@ -182,6 +186,14 @@ public class Protocol {
 
         public FetchResult(byte[][] messages, String error) {
             this.messages = messages;
+            this.error = error;
+        }
+    }
+
+    public static class MetadataResult {
+        public final String error;
+
+        public MetadataResult(String error) {
             this.error = error;
         }
     }

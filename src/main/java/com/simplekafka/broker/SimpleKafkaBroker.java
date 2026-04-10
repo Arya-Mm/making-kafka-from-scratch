@@ -16,8 +16,6 @@ public class SimpleKafkaBroker {
 
         while (true) {
             Socket client = serverSocket.accept();
-            System.out.println("Client connected: " + client.getInetAddress());
-
             new Thread(() -> handleClient(client)).start();
         }
     }
@@ -34,18 +32,15 @@ public class SimpleKafkaBroker {
                 if (read == -1) break;
 
                 ByteBuffer request = ByteBuffer.wrap(buffer, 0, read);
-
                 byte type = request.get();
 
                 if (type == Protocol.PRODUCE) {
-                    System.out.println("Received PRODUCE request");
-
-                    // fake offset
+                    System.out.println("PRODUCE request received");
                     ByteBuffer response = Protocol.encodeProduceResponse(1L);
                     out.write(response.array());
 
                 } else if (type == Protocol.FETCH) {
-                    System.out.println("Received FETCH request");
+                    System.out.println("FETCH request received");
 
                     byte[][] messages = {
                         "hello".getBytes(),
@@ -56,8 +51,6 @@ public class SimpleKafkaBroker {
                     out.write(response.array());
 
                 } else {
-                    System.out.println("Unknown request");
-
                     ByteBuffer response = Protocol.encodeErrorResponse("Unknown request");
                     out.write(response.array());
                 }
