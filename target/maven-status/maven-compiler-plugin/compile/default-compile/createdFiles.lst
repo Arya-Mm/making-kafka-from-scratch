@@ -1,5 +1,6 @@
 com\simplekafka\broker\Protocol$ProduceResult.class
 com\simplekafka\broker\SimpleKafkaBroker.class
+com\simplekafka\broker\PartitionManager.class
 com\simplekafka\broker\Protocol$FetchResult.class
 com\simplekafka\client\TestClient.class
 com\simplekafka\broker\Protocol.class

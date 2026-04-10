@@ -17,7 +17,6 @@ public class Partition {
         this.logFile = new File(dir, topic + ".log");
     }
 
-    // 🔥 WRITE
     public synchronized long append(byte[] message) throws IOException {
         try (FileOutputStream fos = new FileOutputStream(logFile, true)) {
             fos.write(intToBytes(message.length));
@@ -26,7 +25,6 @@ public class Partition {
         return offset.getAndIncrement();
     }
 
-    // 🔥 READ FROM OFFSET
     public synchronized List<byte[]> readFromOffset(long startOffset, int maxMessages) throws IOException {
         List<byte[]> result = new ArrayList<>();
 

@@ -15,11 +15,14 @@ public class TestClient {
 
         System.out.println("Connected to broker");
 
-        // 🔥 PRODUCE
+        // 🔥 choose partition dynamically
+        int partition = Math.abs("arya".hashCode()) % 3;
+
+        // PRODUCE
         ByteBuffer request = Protocol.encodeProduceRequest(
                 "test",
-                0,
-                "arya builds systems".getBytes()
+                partition,
+                "arya dominates distributed systems".getBytes()
         );
 
         socket.write(request);
@@ -35,10 +38,10 @@ public class TestClient {
             System.out.println("Message stored at offset: " + offset);
         }
 
-        // 🔥 FETCH
+        // FETCH from same partition
         ByteBuffer fetchRequest = Protocol.encodeFetchRequest(
                 "test",
-                0,
+                partition,
                 0,
                 10
         );

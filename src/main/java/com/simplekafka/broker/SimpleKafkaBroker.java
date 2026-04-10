@@ -10,7 +10,10 @@ import java.util.List;
 public class SimpleKafkaBroker {
 
     private static final int PORT = 9092;
-    private static final Partition partition = new Partition("test");
+
+    // 🔥 3 partitions
+    private static final PartitionManager partitionManager =
+            new PartitionManager("test", 3);
 
     public static void main(String[] args) throws IOException {
         ServerSocketChannel server = ServerSocketChannel.open();
@@ -58,8 +61,10 @@ public class SimpleKafkaBroker {
                         byte[] message = new byte[messageLength];
                         buffer.get(message);
 
+                        Partition partition = partitionManager.getPartition(partitionId);
                         long offset = partition.append(message);
 
+                        System.out.println("Partition: " + partitionId);
                         System.out.println("Stored message: " + new String(message));
                         System.out.println("Offset: " + offset);
 
@@ -73,7 +78,7 @@ public class SimpleKafkaBroker {
                     }
                 }
 
-                // 🔥 FETCH (REAL)
+                // 🔥 FETCH
                 else if (messageType == Protocol.FETCH) {
                     System.out.println("Received FETCH request");
 
@@ -86,6 +91,7 @@ public class SimpleKafkaBroker {
                         long offset = buffer.getLong();
                         int maxMessages = buffer.getInt();
 
+                        Partition partition = partitionManager.getPartition(partitionId);
                         List<byte[]> messages = partition.readFromOffset(offset, maxMessages);
 
                         byte[][] responseMessages = messages.toArray(new byte[0][]);
@@ -100,9 +106,7 @@ public class SimpleKafkaBroker {
                     }
                 }
 
-                // 🔥 ERROR
                 else {
-                    System.out.println("Unknown request");
                     ByteBuffer error = Protocol.encodeError("Unknown request");
                     client.write(error);
                 }
