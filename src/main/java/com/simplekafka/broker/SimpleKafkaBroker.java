@@ -1,63 +1,92 @@
 package com.simplekafka.broker;
 
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.ServerSocket;
-import java.net.Socket;
+import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 
 public class SimpleKafkaBroker {
 
     private static final int PORT = 9092;
 
-    public static void main(String[] args) throws Exception {
-        ServerSocket serverSocket = new ServerSocket(PORT);
-        System.out.println("Broker started on port " + PORT);
+    // 🔥 REAL STORAGE
+    private static final Partition partition = new Partition("test");
+
+    public static void main(String[] args) throws IOException {
+        ServerSocketChannel server = ServerSocketChannel.open();
+        server.bind(new InetSocketAddress(PORT));
+
+        System.out.println("Broker running on port " + PORT);
 
         while (true) {
-            Socket client = serverSocket.accept();
+            SocketChannel client = server.accept();
+            System.out.println("Client connected");
+
             new Thread(() -> handleClient(client)).start();
         }
     }
 
-    private static void handleClient(Socket client) {
-        try (
-            InputStream in = client.getInputStream();
-            OutputStream out = client.getOutputStream()
-        ) {
-            byte[] buffer = new byte[1024];
+    private static void handleClient(SocketChannel client) {
+        try {
+            ByteBuffer buffer = ByteBuffer.allocate(1024);
 
-            while (true) {
-                int read = in.read(buffer);
-                if (read == -1) break;
+            while (client.isOpen()) {
+                buffer.clear();
+                int bytesRead = client.read(buffer);
 
-                ByteBuffer request = ByteBuffer.wrap(buffer, 0, read);
-                byte type = request.get();
+                if (bytesRead == -1) {
+                    client.close();
+                    break;
+                }
 
-                if (type == Protocol.PRODUCE) {
-                    System.out.println("PRODUCE request received");
-                    ByteBuffer response = Protocol.encodeProduceResponse(1L);
-                    out.write(response.array());
+                buffer.flip();
 
-                } else if (type == Protocol.FETCH) {
-                    System.out.println("FETCH request received");
+                byte messageType = buffer.get();
 
-                    byte[][] messages = {
+                // 🔥 PRODUCE (WRITE TO DISK)
+                if (messageType == Protocol.PRODUCE) {
+                    System.out.println("Received PRODUCE request");
+
+                    // ⚠️ TEMP: still hardcoded message (we fix parsing next)
+                    long offset;
+                    try {
+                        offset = partition.append("hello kafka".getBytes());
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        ByteBuffer error = Protocol.encodeError("Write failed");
+                        client.write(error);
+                        continue;
+                    }
+
+                    ByteBuffer response = Protocol.encodeProduceResponse(offset);
+                    client.write(response);
+
+                }
+
+                // 🔥 FETCH (still fake for now)
+                else if (messageType == Protocol.FETCH) {
+                    System.out.println("Received FETCH request");
+
+                    byte[][] messages = new byte[][] {
                         "hello".getBytes(),
                         "world".getBytes()
                     };
 
                     ByteBuffer response = Protocol.encodeFetchResponse(messages);
-                    out.write(response.array());
+                    client.write(response);
+                }
 
-                } else {
-                    ByteBuffer response = Protocol.encodeErrorResponse("Unknown request");
-                    out.write(response.array());
+                // 🔥 ERROR HANDLING
+                else {
+                    System.out.println("Unknown request");
+                    ByteBuffer error = Protocol.encodeError("Unknown request");
+                    client.write(error);
                 }
             }
 
         } catch (Exception e) {
-            System.out.println("Client disconnected");
+            e.printStackTrace();
         }
     }
 }
