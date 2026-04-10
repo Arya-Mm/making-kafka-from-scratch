@@ -13,16 +13,13 @@ public class TestClient {
         SocketChannel socket = SocketChannel.open();
         socket.connect(new InetSocketAddress("localhost", 9092));
 
-        System.out.println("Connected to broker");
-
-        // 🔥 choose partition dynamically
         int partition = Math.abs("arya".hashCode()) % 3;
 
         // PRODUCE
         ByteBuffer request = Protocol.encodeProduceRequest(
                 "test",
                 partition,
-                "arya dominates distributed systems".getBytes()
+                "consumer groups working".getBytes()
         );
 
         socket.write(request);
@@ -31,19 +28,17 @@ public class TestClient {
         socket.read(response);
         response.flip();
 
-        byte type = response.get();
-
-        if (type == Protocol.PRODUCE_RESPONSE) {
-            long offset = response.getLong();
-            System.out.println("Message stored at offset: " + offset);
+        if (response.get() == Protocol.PRODUCE_RESPONSE) {
+            System.out.println("Produced message");
         }
 
-        // FETCH from same partition
+        // FETCH using GROUP
         ByteBuffer fetchRequest = Protocol.encodeFetchRequest(
                 "test",
                 partition,
                 0,
-                10
+                10,
+                "group-1"
         );
 
         socket.write(fetchRequest);
@@ -52,14 +47,12 @@ public class TestClient {
         socket.read(fetchResponse);
         fetchResponse.flip();
 
-        byte fetchType = fetchResponse.get();
-
-        if (fetchType == Protocol.FETCH_RESPONSE) {
-            int messageCount = fetchResponse.getInt();
+        if (fetchResponse.get() == Protocol.FETCH_RESPONSE) {
+            int count = fetchResponse.getInt();
 
             System.out.println("Fetched messages:");
 
-            for (int i = 0; i < messageCount; i++) {
+            for (int i = 0; i < count; i++) {
                 int len = fetchResponse.getInt();
                 byte[] msg = new byte[len];
                 fetchResponse.get(msg);

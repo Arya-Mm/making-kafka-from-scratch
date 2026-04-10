@@ -10,9 +10,7 @@ public class ConsumerGroupManager {
 
     public synchronized long getOffset(String groupId, int partition) {
         groupOffsets.putIfAbsent(groupId, new HashMap<>());
-        Map<Integer, Long> partitionOffsets = groupOffsets.get(groupId);
-
-        return partitionOffsets.getOrDefault(partition, 0L);
+        return groupOffsets.get(groupId).getOrDefault(partition, 0L);
     }
 
     public synchronized void commitOffset(String groupId, int partition, long offset) {

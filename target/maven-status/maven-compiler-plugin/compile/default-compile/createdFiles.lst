@@ -1,9 +1,7 @@
-com\simplekafka\broker\Protocol$ProduceResult.class
 com\simplekafka\broker\SimpleKafkaBroker.class
 com\simplekafka\broker\PartitionManager.class
-com\simplekafka\broker\Protocol$FetchResult.class
 com\simplekafka\client\TestClient.class
+com\simplekafka\broker\ConsumerGroupManager.class
 com\simplekafka\broker\Protocol.class
 com\simplekafka\broker\BrokerInfo.class
 com\simplekafka\broker\Partition.class
-com\simplekafka\broker\Protocol$MetadataResult.class

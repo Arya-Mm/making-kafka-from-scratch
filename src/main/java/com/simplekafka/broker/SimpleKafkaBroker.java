@@ -11,9 +11,11 @@ public class SimpleKafkaBroker {
 
     private static final int PORT = 9092;
 
-    // 🔥 3 partitions
     private static final PartitionManager partitionManager =
             new PartitionManager("test", 3);
+
+    private static final ConsumerGroupManager groupManager =
+            new ConsumerGroupManager();
 
     public static void main(String[] args) throws IOException {
         ServerSocketChannel server = ServerSocketChannel.open();
@@ -46,10 +48,8 @@ public class SimpleKafkaBroker {
 
                 byte messageType = buffer.get();
 
-                // 🔥 PRODUCE
+                // PRODUCE
                 if (messageType == Protocol.PRODUCE) {
-                    System.out.println("Received PRODUCE request");
-
                     try {
                         short topicLength = buffer.getShort();
                         byte[] topicBytes = new byte[topicLength];
@@ -65,7 +65,7 @@ public class SimpleKafkaBroker {
                         long offset = partition.append(message);
 
                         System.out.println("Partition: " + partitionId);
-                        System.out.println("Stored message: " + new String(message));
+                        System.out.println("Stored: " + new String(message));
                         System.out.println("Offset: " + offset);
 
                         ByteBuffer response = Protocol.encodeProduceResponse(offset);
@@ -73,42 +73,55 @@ public class SimpleKafkaBroker {
 
                     } catch (Exception e) {
                         e.printStackTrace();
-                        ByteBuffer error = Protocol.encodeError("Produce failed");
-                        client.write(error);
+                        client.write(Protocol.encodeError("Produce failed"));
                     }
                 }
 
-                // 🔥 FETCH
+                // FETCH WITH GROUP
                 else if (messageType == Protocol.FETCH) {
-                    System.out.println("Received FETCH request");
-
                     try {
                         short topicLength = buffer.getShort();
                         byte[] topicBytes = new byte[topicLength];
                         buffer.get(topicBytes);
 
                         int partitionId = buffer.getInt();
-                        long offset = buffer.getLong();
+                        long ignoredOffset = buffer.getLong(); // ignored
                         int maxMessages = buffer.getInt();
 
+                        short groupLen = buffer.getShort();
+                        byte[] groupBytes = new byte[groupLen];
+                        buffer.get(groupBytes);
+                        String groupId = new String(groupBytes);
+
                         Partition partition = partitionManager.getPartition(partitionId);
-                        List<byte[]> messages = partition.readFromOffset(offset, maxMessages);
 
-                        byte[][] responseMessages = messages.toArray(new byte[0][]);
+                        long groupOffset = groupManager.getOffset(groupId, partitionId);
 
-                        ByteBuffer response = Protocol.encodeFetchResponse(responseMessages);
+                        List<byte[]> messages =
+                                partition.readFromOffset(groupOffset, maxMessages);
+
+                        byte[][] responseMessages =
+                                messages.toArray(new byte[0][]);
+
+                        groupManager.commitOffset(
+                                groupId,
+                                partitionId,
+                                groupOffset + messages.size()
+                        );
+
+                        ByteBuffer response =
+                                Protocol.encodeFetchResponse(responseMessages);
+
                         client.write(response);
 
                     } catch (Exception e) {
                         e.printStackTrace();
-                        ByteBuffer error = Protocol.encodeError("Fetch failed");
-                        client.write(error);
+                        client.write(Protocol.encodeError("Fetch failed"));
                     }
                 }
 
                 else {
-                    ByteBuffer error = Protocol.encodeError("Unknown request");
-                    client.write(error);
+                    client.write(Protocol.encodeError("Unknown request"));
                 }
             }
 
