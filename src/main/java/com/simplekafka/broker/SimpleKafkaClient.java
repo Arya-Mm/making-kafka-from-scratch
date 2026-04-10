@@ -1,4 +1,4 @@
-package com.simplekafka.client;
+package com.simplekafka.broker;
 
 import com.simplekafka.broker.Protocol;
 
