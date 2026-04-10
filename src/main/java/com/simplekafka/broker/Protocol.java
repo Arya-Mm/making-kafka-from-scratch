@@ -1,20 +1,30 @@
 package com.simplekafka.broker;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 
 public class Protocol {
 
+    // ================= REQUEST TYPES =================
     public static final byte PRODUCE = 0x01;
     public static final byte FETCH = 0x02;
 
+    // 🔥 NEW
+    public static final byte REPLICATE = 0x05;
+
+    // ================= RESPONSE TYPES =================
     public static final byte PRODUCE_RESPONSE = 0x11;
     public static final byte FETCH_RESPONSE = 0x12;
-    public static final byte ERROR_RESPONSE = 0x7F;
+    public static final byte ERROR_RESPONSE = 0x13;
 
-    // PRODUCE
-    public static ByteBuffer encodeProduceRequest(String topic, int partition, byte[] message) {
-        byte[] topicBytes = topic.getBytes(StandardCharsets.UTF_8);
+    // =================================================
+    // 🔥 PRODUCE REQUEST
+    // =================================================
+    public static ByteBuffer encodeProduceRequest(
+            String topic,
+            int partition,
+            byte[] message) {
+
+        byte[] topicBytes = topic.getBytes();
 
         ByteBuffer buffer = ByteBuffer.allocate(
                 1 + 2 + topicBytes.length + 4 + 4 + message.length
@@ -31,27 +41,40 @@ public class Protocol {
         return buffer;
     }
 
+    // =================================================
+    // 🔥 PRODUCE RESPONSE
+    // =================================================
     public static ByteBuffer encodeProduceResponse(long offset) {
+
         ByteBuffer buffer = ByteBuffer.allocate(1 + 8);
+
         buffer.put(PRODUCE_RESPONSE);
         buffer.putLong(offset);
+
         buffer.flip();
         return buffer;
     }
 
-    // FETCH WITH GROUP
+    // =================================================
+    // 🔥 FETCH REQUEST (WITH CONSUMER GROUP)
+    // =================================================
     public static ByteBuffer encodeFetchRequest(
             String topic,
             int partition,
             long offset,
             int maxMessages,
-            String groupId
-    ) {
-        byte[] topicBytes = topic.getBytes(StandardCharsets.UTF_8);
-        byte[] groupBytes = groupId.getBytes(StandardCharsets.UTF_8);
+            String groupId) {
+
+        byte[] topicBytes = topic.getBytes();
+        byte[] groupBytes = groupId.getBytes();
 
         ByteBuffer buffer = ByteBuffer.allocate(
-                1 + 2 + topicBytes.length + 4 + 8 + 4 + 2 + groupBytes.length
+                1 +
+                2 + topicBytes.length +
+                4 +
+                8 +
+                4 +
+                2 + groupBytes.length
         );
 
         buffer.put(FETCH);
@@ -68,14 +91,19 @@ public class Protocol {
         return buffer;
     }
 
+    // =================================================
+    // 🔥 FETCH RESPONSE
+    // =================================================
     public static ByteBuffer encodeFetchResponse(byte[][] messages) {
-        int size = 1 + 4;
+
+        int totalSize = 1 + 4;
 
         for (byte[] msg : messages) {
-            size += 4 + msg.length;
+            totalSize += 4 + msg.length;
         }
 
-        ByteBuffer buffer = ByteBuffer.allocate(size);
+        ByteBuffer buffer = ByteBuffer.allocate(totalSize);
+
         buffer.put(FETCH_RESPONSE);
         buffer.putInt(messages.length);
 
@@ -88,13 +116,51 @@ public class Protocol {
         return buffer;
     }
 
-    public static ByteBuffer encodeError(String errorMsg) {
-        byte[] err = errorMsg.getBytes(StandardCharsets.UTF_8);
+    // =================================================
+    // 🔥 REPLICATION REQUEST
+    // =================================================
+    public static ByteBuffer encodeReplicateRequest(
+            String topic,
+            int partition,
+            long offset,
+            byte[] message) {
 
-        ByteBuffer buffer = ByteBuffer.allocate(1 + 4 + err.length);
+        byte[] topicBytes = topic.getBytes();
+
+        ByteBuffer buffer = ByteBuffer.allocate(
+                1 +
+                2 + topicBytes.length +
+                4 +
+                8 +
+                4 + message.length
+        );
+
+        buffer.put(REPLICATE);
+        buffer.putShort((short) topicBytes.length);
+        buffer.put(topicBytes);
+        buffer.putInt(partition);
+        buffer.putLong(offset);
+        buffer.putInt(message.length);
+        buffer.put(message);
+
+        buffer.flip();
+        return buffer;
+    }
+
+    // =================================================
+    // 🔥 ERROR RESPONSE
+    // =================================================
+    public static ByteBuffer encodeError(String errorMessage) {
+
+        byte[] errorBytes = errorMessage.getBytes();
+
+        ByteBuffer buffer = ByteBuffer.allocate(
+                1 + 2 + errorBytes.length
+        );
+
         buffer.put(ERROR_RESPONSE);
-        buffer.putInt(err.length);
-        buffer.put(err);
+        buffer.putShort((short) errorBytes.length);
+        buffer.put(errorBytes);
 
         buffer.flip();
         return buffer;
