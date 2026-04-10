@@ -1,6 +1,7 @@
 package com.simplekafka.broker;
 
 public class BrokerInfo {
+
     private final int id;
     private final String host;
     private final int port;
@@ -25,20 +26,6 @@ public class BrokerInfo {
 
     @Override
     public String toString() {
-        return "BrokerInfo{id=" + id + ", host='" + host + "', port=" + port + "}";
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-        if (this == obj) return true;
-        if (obj == null || getClass() != obj.getClass()) return false;
-
-        BrokerInfo other = (BrokerInfo) obj;
-        return id == other.id;
-    }
-
-    @Override
-    public int hashCode() {
-        return Integer.hashCode(id);
+        return id + ":" + host + ":" + port;
     }
 }
