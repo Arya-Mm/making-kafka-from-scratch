@@ -10,16 +10,23 @@ public class TestClient {
 
     public static void main(String[] args) throws Exception {
 
-        SocketChannel socket = SocketChannel.open();
-        socket.connect(new InetSocketAddress("localhost", 9092));
-
+        // 🔥 choose partition
         int partition = Math.abs("arya".hashCode()) % 3;
+
+        // 🔥 route to correct broker
+        int brokerId = partition % 3;
+        int port = 9092 + brokerId;
+
+        SocketChannel socket = SocketChannel.open();
+        socket.connect(new InetSocketAddress("localhost", port));
+
+        System.out.println("Connected to broker " + brokerId);
 
         // PRODUCE
         ByteBuffer request = Protocol.encodeProduceRequest(
                 "test",
                 partition,
-                "consumer groups working".getBytes()
+                "multi broker working".getBytes()
         );
 
         socket.write(request);
@@ -29,10 +36,10 @@ public class TestClient {
         response.flip();
 
         if (response.get() == Protocol.PRODUCE_RESPONSE) {
-            System.out.println("Produced message");
+            System.out.println("Produced successfully");
         }
 
-        // FETCH using GROUP
+        // FETCH
         ByteBuffer fetchRequest = Protocol.encodeFetchRequest(
                 "test",
                 partition,
