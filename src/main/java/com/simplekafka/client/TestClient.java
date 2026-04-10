@@ -9,21 +9,21 @@ import java.nio.channels.SocketChannel;
 public class TestClient {
 
     public static void main(String[] args) throws Exception {
+
         SocketChannel socket = SocketChannel.open();
         socket.connect(new InetSocketAddress("localhost", 9092));
 
         System.out.println("Connected to broker");
 
-        // SEND PRODUCE REQUEST
+        // 🔥 PRODUCE
         ByteBuffer request = Protocol.encodeProduceRequest(
                 "test",
                 0,
-                "arya dominates systems".getBytes()
+                "arya builds systems".getBytes()
         );
 
         socket.write(request);
 
-        // READ RESPONSE
         ByteBuffer response = ByteBuffer.allocate(1024);
         socket.read(response);
         response.flip();
@@ -33,8 +33,36 @@ public class TestClient {
         if (type == Protocol.PRODUCE_RESPONSE) {
             long offset = response.getLong();
             System.out.println("Message stored at offset: " + offset);
-        } else {
-            System.out.println("Unknown response");
+        }
+
+        // 🔥 FETCH
+        ByteBuffer fetchRequest = Protocol.encodeFetchRequest(
+                "test",
+                0,
+                0,
+                10
+        );
+
+        socket.write(fetchRequest);
+
+        ByteBuffer fetchResponse = ByteBuffer.allocate(1024);
+        socket.read(fetchResponse);
+        fetchResponse.flip();
+
+        byte fetchType = fetchResponse.get();
+
+        if (fetchType == Protocol.FETCH_RESPONSE) {
+            int messageCount = fetchResponse.getInt();
+
+            System.out.println("Fetched messages:");
+
+            for (int i = 0; i < messageCount; i++) {
+                int len = fetchResponse.getInt();
+                byte[] msg = new byte[len];
+                fetchResponse.get(msg);
+
+                System.out.println(new String(msg));
+            }
         }
 
         socket.close();

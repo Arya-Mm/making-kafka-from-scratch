@@ -20,11 +20,9 @@ public class Partition {
     // 🔥 WRITE
     public synchronized long append(byte[] message) throws IOException {
         try (FileOutputStream fos = new FileOutputStream(logFile, true)) {
-
             fos.write(intToBytes(message.length));
             fos.write(message);
         }
-
         return offset.getAndIncrement();
     }
 
