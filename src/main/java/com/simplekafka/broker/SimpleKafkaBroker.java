@@ -10,7 +10,7 @@ public class SimpleKafkaBroker {
 
     private static final int PORT = 9092;
 
-    // 🔥 REAL STORAGE
+    // 🔥 Storage engine
     private static final Partition partition = new Partition("test");
 
     public static void main(String[] args) throws IOException {
@@ -44,40 +44,55 @@ public class SimpleKafkaBroker {
 
                 byte messageType = buffer.get();
 
-                // 🔥 PRODUCE (WRITE TO DISK)
+                // 🔥 PRODUCE (REAL PARSING + STORAGE)
                 if (messageType == Protocol.PRODUCE) {
                     System.out.println("Received PRODUCE request");
 
-                    // ⚠️ TEMP: still hardcoded message (we fix parsing next)
-                    long offset;
                     try {
-                        offset = partition.append("hello kafka".getBytes());
+                        // Read topic
+                        short topicLength = buffer.getShort();
+                        byte[] topicBytes = new byte[topicLength];
+                        buffer.get(topicBytes);
+                        String topic = new String(topicBytes);
+
+                        // Read partition
+                        int partitionId = buffer.getInt();
+
+                        // Read message
+                        int messageLength = buffer.getInt();
+                        byte[] message = new byte[messageLength];
+                        buffer.get(message);
+
+                        // Store message
+                        long offset = partition.append(message);
+
+                        System.out.println("Stored message: " + new String(message));
+                        System.out.println("Offset: " + offset);
+
+                        ByteBuffer response = Protocol.encodeProduceResponse(offset);
+                        client.write(response);
+
                     } catch (Exception e) {
                         e.printStackTrace();
-                        ByteBuffer error = Protocol.encodeError("Write failed");
+                        ByteBuffer error = Protocol.encodeError("Produce failed");
                         client.write(error);
-                        continue;
                     }
-
-                    ByteBuffer response = Protocol.encodeProduceResponse(offset);
-                    client.write(response);
-
                 }
 
-                // 🔥 FETCH (still fake for now)
+                // 🔥 FETCH (still basic for now)
                 else if (messageType == Protocol.FETCH) {
                     System.out.println("Received FETCH request");
 
                     byte[][] messages = new byte[][] {
-                        "hello".getBytes(),
-                        "world".getBytes()
+                            "hello".getBytes(),
+                            "world".getBytes()
                     };
 
                     ByteBuffer response = Protocol.encodeFetchResponse(messages);
                     client.write(response);
                 }
 
-                // 🔥 ERROR HANDLING
+                // 🔥 UNKNOWN REQUEST
                 else {
                     System.out.println("Unknown request");
                     ByteBuffer error = Protocol.encodeError("Unknown request");
