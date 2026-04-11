@@ -97,22 +97,43 @@ public class Protocol {
         }
 
         int count = buffer.getInt();
-        List<byte[]> messages = new ArrayList<>(count);
+        List<FetchMessage> messages = new ArrayList<>(count);
 
         for (int i = 0; i < count; i++) {
+            long offset = buffer.getLong();
             int len = buffer.getInt();
             byte[] message = new byte[len];
             buffer.get(message);
-            messages.add(message);
+            messages.add(new FetchMessage(offset, message));
         }
 
         return new FetchResult(messages, null);
     }
 
+    public static ByteBuffer encodeFetchResponse(List<FetchMessage> messages) {
+        int size = 1 + 4;
+        for (FetchMessage message : messages) {
+            size += 8 + 4 + message.getMessage().length;
+        }
+
+        ByteBuffer buffer = ByteBuffer.allocate(size);
+        buffer.put(FETCH_RESPONSE);
+        buffer.putInt(messages.size());
+
+        for (FetchMessage message : messages) {
+            buffer.putLong(message.getOffset());
+            buffer.putInt(message.getMessage().length);
+            buffer.put(message.getMessage());
+        }
+
+        buffer.flip();
+        return buffer;
+    }
+
     public static ByteBuffer encodeFetchResponse(byte[][] messages) {
         int size = 1 + 4;
         for (byte[] message : messages) {
-            size += 4 + message.length;
+            size += 8 + 4 + message.length;
         }
 
         ByteBuffer buffer = ByteBuffer.allocate(size);
@@ -120,6 +141,7 @@ public class Protocol {
         buffer.putInt(messages.length);
 
         for (byte[] message : messages) {
+            buffer.putLong(0L); // placeholder offset for compatibility
             buffer.putInt(message.length);
             buffer.put(message);
         }
@@ -332,20 +354,48 @@ public class Protocol {
     }
 
     public static class FetchResult {
-        private final List<byte[]> messages;
+        private final List<FetchMessage> messages;
         private final String error;
 
-        public FetchResult(List<byte[]> messages, String error) {
+        public FetchResult(List<FetchMessage> messages, String error) {
             this.messages = messages;
             this.error = error;
         }
 
-        public List<byte[]> messages() {
+        public List<FetchMessage> records() {
             return messages;
+        }
+
+        public List<byte[]> messages() {
+            List<byte[]> raw = new ArrayList<>();
+            if (messages != null) {
+                for (FetchMessage entry : messages) {
+                    raw.add(entry.getMessage());
+                }
+            }
+            return raw;
         }
 
         public String error() {
             return error;
+        }
+    }
+
+    public static class FetchMessage {
+        private final long offset;
+        private final byte[] message;
+
+        public FetchMessage(long offset, byte[] message) {
+            this.offset = offset;
+            this.message = message;
+        }
+
+        public long getOffset() {
+            return offset;
+        }
+
+        public byte[] getMessage() {
+            return message;
         }
     }
 
