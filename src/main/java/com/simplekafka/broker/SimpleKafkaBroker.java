@@ -1,5 +1,6 @@
 package com.simplekafka.broker;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
@@ -12,10 +13,13 @@ import java.util.concurrent.Executors;
 
 public class SimpleKafkaBroker {
 
+    private static final String DATA_DIR = "data";
+
     private final int brokerId;
     private final String host;
     private final int port;
     private final int zkPort;
+    private final String dataDir;
     private final ZookeeperClient zkClient;
     private final Map<String, PartitionManager> topics = new ConcurrentHashMap<>();
     private final Map<String, Map<Integer, PartitionMetadata>> topicMetadata = new ConcurrentHashMap<>();
@@ -28,6 +32,11 @@ public class SimpleKafkaBroker {
         this.host = host;
         this.port = port;
         this.zkPort = zkPort;
+        this.dataDir = new File(DATA_DIR, String.valueOf(brokerId)).getAbsolutePath();
+        File brokerData = new File(this.dataDir);
+        if (!brokerData.exists() && !brokerData.mkdirs()) {
+            throw new IOException("Unable to create broker data directory: " + brokerData);
+        }
         this.zkClient = new ZookeeperClient(host, zkPort);
     }
 
@@ -150,7 +159,7 @@ public class SimpleKafkaBroker {
             }
 
             topicMetadata.put(topic, partitionMetadataMap);
-            topics.put(topic, new PartitionManager(topic, partitionCount));
+            topics.put(topic, new PartitionManager(topic, partitionCount, dataDir));
             System.out.println("Loaded topic " + topic + " with " + partitionMetadataMap.size() + " partitions");
         } catch (Exception e) {
             System.err.println("Failed to load topic metadata for " + topic + ": " + e.getMessage());
@@ -437,7 +446,11 @@ public class SimpleKafkaBroker {
         }
 
         topicMetadata.put(topic, partitionMetadataMap);
-        topics.put(topic, new PartitionManager(topic, numPartitions));
+        try {
+            topics.put(topic, new PartitionManager(topic, numPartitions, dataDir));
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to initialize topic storage: " + e.getMessage(), e);
+        }
         notifyTopicCreation(topic);
     }
 
