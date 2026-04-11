@@ -118,6 +118,32 @@ public class SimpleKafkaClient {
         }
     }
 
+    public java.util.List<Protocol.FetchMessage> fetchWithOffsets(String topic, int partition, long offset, int maxMessages) throws IOException {
+        ensureTopicMetadata(topic);
+
+        BrokerInfo leader = getLeader(topic, partition);
+
+        try (SocketChannel socket = SocketChannel.open()) {
+            socket.connect(new InetSocketAddress(leader.getHost(), leader.getPort()));
+            socket.write(Protocol.encodeFetchRequest(topic, partition, offset, maxMessages, "default"));
+
+            ByteBuffer response = ByteBuffer.allocate(8192);
+            int bytesRead = socket.read(response);
+            if (bytesRead <= 0) {
+                throw new IOException("No response from broker");
+            }
+
+            response.flip();
+            Protocol.FetchResult result = Protocol.decodeFetchResponse(response);
+
+            if (result.error() != null) {
+                throw new IOException(result.error());
+            }
+
+            return result.records();
+        }
+    }
+
     public int getPartitionCount(String topic) {
         TopicMetadata metadata = topicMetadata.get(topic);
         return metadata == null ? 0 : metadata.partitions().size();

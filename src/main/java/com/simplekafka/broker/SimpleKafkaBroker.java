@@ -337,9 +337,9 @@ public class SimpleKafkaBroker {
         }
 
         try {
-            List<byte[]> messages = manager.getPartition(partition).readFromOffset(offset, maxMessages);
-            byte[][] payload = messages.toArray(new byte[0][]);
-            clientChannel.write(Protocol.encodeFetchResponse(payload));
+            List<Protocol.FetchMessage> messages =
+                    manager.getPartition(partition).readFromOffsetWithOffsets(offset, maxMessages);
+            clientChannel.write(Protocol.encodeFetchResponse(messages));
         } catch (IOException e) {
             Protocol.sendErrorResponse(clientChannel, "Fetch failed: " + e.getMessage());
         }

@@ -142,6 +142,58 @@ public class Partition {
         }
     }
 
+    public List<Protocol.FetchMessage> readFromOffsetWithOffsets(long startOffset, int maxMessages) throws IOException {
+        lock.readLock().lock();
+        try {
+            List<Protocol.FetchMessage> result = new ArrayList<>();
+            if (segments.isEmpty()) {
+                return result;
+            }
+
+            int segmentIndex = findSegmentIndexForOffset(startOffset);
+            if (segmentIndex < 0) {
+                return result;
+            }
+
+            long nextOffsetToRead = startOffset;
+            for (int i = segmentIndex; i < segments.size() && result.size() < maxMessages; i++) {
+                SegmentInfo segment = segments.get(i);
+                long position = findPositionForOffset(segment, nextOffsetToRead);
+                if (position < 0) {
+                    if (i == segmentIndex) {
+                        return result;
+                    }
+                    position = 0;
+                }
+
+                try (RandomAccessFile raf = new RandomAccessFile(segment.logFile, "r");
+                     FileChannel channel = raf.getChannel()) {
+
+                    channel.position(position);
+                    while (result.size() < maxMessages && channel.position() < channel.size()) {
+                        ByteBuffer lenBuf = ByteBuffer.allocate(4);
+                        if (channel.read(lenBuf) < 4) {
+                            break;
+                        }
+                        lenBuf.flip();
+                        int length = lenBuf.getInt();
+                        ByteBuffer msgBuf = ByteBuffer.allocate(length);
+                        if (channel.read(msgBuf) < length) {
+                            break;
+                        }
+                        msgBuf.flip();
+                        result.add(new Protocol.FetchMessage(nextOffsetToRead, msgBuf.array()));
+                        nextOffsetToRead++;
+                    }
+                }
+            }
+
+            return result;
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
     public long getNextOffset() {
         return nextOffset.get();
     }
