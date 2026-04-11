@@ -131,20 +131,27 @@ public class SimpleKafkaBroker {
                 return;
             }
 
-            int partitionCount = partitionIds.size();
-            PartitionManager manager = new PartitionManager(topic, partitionCount);
-            topics.put(topic, manager);
-
-            Map<Integer, PartitionMetadata> partitionMetadata = new ConcurrentHashMap<>();
+            Map<Integer, PartitionMetadata> partitionMetadataMap = new ConcurrentHashMap<>();
+            int partitionCount = 0;
             for (String partitionId : partitionIds) {
+                if (partitionId == null || partitionId.isBlank()) {
+                    continue;
+                }
+
                 int pid = Integer.parseInt(partitionId);
                 String state = zkClient.getData(partitionPath + "/" + partitionId + "/state");
-                partitionMetadata.put(pid, parsePartitionState(state));
+                partitionMetadataMap.put(pid, parsePartitionState(state));
                 watchPartitionState(topic, pid);
+                partitionCount = Math.max(partitionCount, pid + 1);
             }
 
-            topicMetadata.put(topic, partitionMetadata);
-            System.out.println("Loaded topic " + topic + " with " + partitionCount + " partitions");
+            if (partitionCount == 0) {
+                return;
+            }
+
+            topicMetadata.put(topic, partitionMetadataMap);
+            topics.put(topic, new PartitionManager(topic, partitionCount));
+            System.out.println("Loaded topic " + topic + " with " + partitionMetadataMap.size() + " partitions");
         } catch (Exception e) {
             System.err.println("Failed to load topic metadata for " + topic + ": " + e.getMessage());
         }
@@ -221,19 +228,22 @@ public class SimpleKafkaBroker {
     }
 
     private void processClientMessage(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
+        ByteBuffer originalRequest = buffer.duplicate();
+        originalRequest.rewind();
+
         byte messageType = buffer.get();
         switch (messageType) {
             case Protocol.PRODUCE:
-                handleProduceRequest(clientChannel, buffer);
+                handleProduceRequest(clientChannel, buffer, originalRequest);
                 break;
             case Protocol.FETCH:
-                handleFetchRequest(clientChannel, buffer);
+                handleFetchRequest(clientChannel, buffer, originalRequest);
                 break;
             case Protocol.METADATA:
                 handleMetadataRequest(clientChannel);
                 break;
             case Protocol.CREATE_TOPIC:
-                handleCreateTopicRequest(clientChannel, buffer);
+                handleCreateTopicRequest(clientChannel, buffer, originalRequest);
                 break;
             case Protocol.REPLICATE:
                 handleReplicateRequest(clientChannel, buffer);
@@ -246,8 +256,7 @@ public class SimpleKafkaBroker {
         }
     }
 
-    private void handleProduceRequest(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
-        ByteBuffer requestCopy = buffer.duplicate();
+    private void handleProduceRequest(SocketChannel clientChannel, ByteBuffer buffer, ByteBuffer originalRequest) throws IOException {
         String topic = readString(buffer);
         int partition = buffer.getInt();
         int length = buffer.getInt();
@@ -266,7 +275,7 @@ public class SimpleKafkaBroker {
         }
 
         if (leader.getId() != brokerId) {
-            forwardRequest(clientChannel, requestCopy, leader);
+            forwardRequest(clientChannel, originalRequest, leader);
             return;
         }
 
@@ -285,8 +294,7 @@ public class SimpleKafkaBroker {
         }
     }
 
-    private void handleFetchRequest(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
-        ByteBuffer requestCopy = buffer.duplicate();
+    private void handleFetchRequest(SocketChannel clientChannel, ByteBuffer buffer, ByteBuffer originalRequest) throws IOException {
         String topic = readString(buffer);
         int partition = buffer.getInt();
         long offset = buffer.getLong();
@@ -309,7 +317,7 @@ public class SimpleKafkaBroker {
         }
 
         if (leader.getId() != brokerId) {
-            forwardRequest(clientChannel, requestCopy, leader);
+            forwardRequest(clientChannel, originalRequest, leader);
             return;
         }
 
@@ -343,7 +351,7 @@ public class SimpleKafkaBroker {
         clientChannel.write(Protocol.encodeMetadataResponse(brokers, topicLeaders));
     }
 
-    private void handleCreateTopicRequest(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
+    private void handleCreateTopicRequest(SocketChannel clientChannel, ByteBuffer buffer, ByteBuffer originalRequest) throws IOException {
         String topic = readString(buffer);
         int numPartitions = buffer.getInt();
         short replicationFactor = buffer.getShort();
@@ -354,7 +362,7 @@ public class SimpleKafkaBroker {
                 Protocol.sendErrorResponse(clientChannel, "No controller available");
                 return;
             }
-            forwardRequest(clientChannel, buffer, controller); // message already has type consumed, but this is rare path
+            forwardRequest(clientChannel, originalRequest, controller);
             return;
         }
 
@@ -410,7 +418,7 @@ public class SimpleKafkaBroker {
         zkClient.createPersistentNode(topicRoot, "partitions=" + numPartitions);
         zkClient.createPersistentNode(topicRoot + "/partitions", "");
 
-        Map<Integer, PartitionMetadata> partitionMetadata = new ConcurrentHashMap<>();
+        Map<Integer, PartitionMetadata> partitionMetadataMap = new ConcurrentHashMap<>();
         for (int i = 0; i < numPartitions; i++) {
             BrokerInfo leader = brokers.get(i % brokers.size());
             List<Integer> followers = new ArrayList<>();
@@ -425,10 +433,10 @@ public class SimpleKafkaBroker {
 
             String state = "leader=" + leader.getId() + ",followers=" + String.join(";", toStringIds(followers));
             zkClient.createPersistentNode(topicRoot + "/partitions/" + i + "/state", state);
-            partitionMetadata.put(i, new PartitionMetadata(leader.getId(), followers));
+            partitionMetadataMap.put(i, new PartitionMetadata(leader.getId(), followers));
         }
 
-        topicMetadata.put(topic, partitionMetadata);
+        topicMetadata.put(topic, partitionMetadataMap);
         topics.put(topic, new PartitionManager(topic, numPartitions));
         notifyTopicCreation(topic);
     }
@@ -486,6 +494,7 @@ public class SimpleKafkaBroker {
                 Protocol.sendErrorResponse(clientChannel, "No response from leader");
                 return;
             }
+
             response.flip();
             while (response.hasRemaining()) {
                 clientChannel.write(response);
@@ -531,12 +540,12 @@ public class SimpleKafkaBroker {
     }
 
     private void replicateToFollowers(String topic, int partition, byte[] message, long offset) {
-        Map<Integer, PartitionMetadata> partitionMetadata = topicMetadata.get(topic);
-        if (partitionMetadata == null) {
+        Map<Integer, PartitionMetadata> partitionMetadataMap = topicMetadata.get(topic);
+        if (partitionMetadataMap == null) {
             return;
         }
 
-        PartitionMetadata metadata = partitionMetadata.get(partition);
+        PartitionMetadata metadata = partitionMetadataMap.get(partition);
         if (metadata == null || metadata.followers.isEmpty()) {
             return;
         }
@@ -555,14 +564,14 @@ public class SimpleKafkaBroker {
 
                     ByteBuffer response = ByteBuffer.allocate(1024);
                     int bytesRead = socket.read(response);
-                    if (bytesRead > 0) {
-                        response.flip();
-                        Protocol.ProduceResult result = Protocol.decodeProduceResponse(response);
-                        if (result.error() != null) {
-                            System.err.println("Replication error to follower " + followerId + ": " + result.error());
-                        }
-                    } else {
+                    if (bytesRead <= 0) {
                         System.err.println("No replication ack from follower " + followerId);
+                        return;
+                    }
+                    response.flip();
+                    Protocol.ProduceResult result = Protocol.decodeProduceResponse(response);
+                    if (result.error() != null) {
+                        System.err.println("Replication error to follower " + followerId + ": " + result.error());
                     }
                 } catch (IOException e) {
                     System.err.println("Failed to replicate to follower " + followerId + ": " + e.getMessage());
