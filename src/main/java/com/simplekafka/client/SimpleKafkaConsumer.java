@@ -1,6 +1,7 @@
 package com.simplekafka.client;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -84,5 +85,27 @@ public class SimpleKafkaConsumer {
 
     public interface MessageHandler {
         void handle(byte[] message, long offset);
+    }
+
+    public static void main(String[] args) throws IOException, InterruptedException {
+        if (args.length < 4) {
+            System.err.println("Usage: java com.simplekafka.client.SimpleKafkaConsumer <bootstrapHost> <bootstrapPort> <topic> <partition>");
+            System.exit(1);
+        }
+
+        String host = args[0];
+        int port = Integer.parseInt(args[1]);
+        String topic = args[2];
+        int partition = Integer.parseInt(args[3]);
+
+        SimpleKafkaConsumer consumer = new SimpleKafkaConsumer(host, port, topic, partition);
+        consumer.initialize();
+
+        consumer.startConsuming((message, offset) ->
+                System.out.println("Consumed offset " + offset + ": " + new String(message, StandardCharsets.UTF_8))
+        );
+
+        Thread.sleep(10000);
+        consumer.stop();
     }
 }

@@ -34,4 +34,25 @@ public class SimpleKafkaProducer {
     public void close() {
         // no resources to close in this minimal implementation
     }
+
+    public static void main(String[] args) throws IOException {
+        if (args.length < 3) {
+            System.err.println("Usage: java com.simplekafka.client.SimpleKafkaProducer <bootstrapHost> <bootstrapPort> <topic>");
+            System.exit(1);
+        }
+
+        String host = args[0];
+        int port = Integer.parseInt(args[1]);
+        String topic = args[2];
+
+        SimpleKafkaProducer producer = new SimpleKafkaProducer(host, port, topic);
+        producer.initialize();
+
+        for (int i = 0; i < 10; i++) {
+            long offset = producer.send("msg-" + i);
+            System.out.println("Produced at offset: " + offset);
+        }
+
+        producer.close();
+    }
 }

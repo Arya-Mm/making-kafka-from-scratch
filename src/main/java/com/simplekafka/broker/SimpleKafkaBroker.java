@@ -51,6 +51,7 @@ public class SimpleKafkaBroker {
         electController();
         watchController();
         watchBrokerChanges();
+        watchTopicChanges();
         loadTopicsFromZookeeper();
 
         serverChannel = ServerSocketChannel.open();
@@ -99,6 +100,20 @@ public class SimpleKafkaBroker {
     private void watchBrokerChanges() {
         zkClient.watchChildren("/brokers/ids", children -> {
             System.out.println("Broker registry changed: " + children);
+        });
+    }
+
+    private void watchTopicChanges() {
+        zkClient.watchChildren("/topics", children -> {
+            for (String topic : children) {
+                if (topic == null || topic.isBlank()) {
+                    continue;
+                }
+
+                if (!topicMetadata.containsKey(topic)) {
+                    loadTopic(topic);
+                }
+            }
         });
     }
 
@@ -200,7 +215,26 @@ public class SimpleKafkaBroker {
         topics.put(topic, manager);
         topicMetadata.put(topic, metadata);
 
+        notifyTopicCreation(topic);
+
         System.out.println("Created topic " + topic + ", partitions=" + numPartitions + ", replication=" + replicationFactor);
+    }
+
+    private void notifyTopicCreation(String topic) {
+        for (BrokerInfo broker : getBrokerList()) {
+            if (broker.getId() == brokerId) {
+                continue;
+            }
+
+            executor.submit(() -> {
+                try (SocketChannel socket = SocketChannel.open()) {
+                    socket.connect(new InetSocketAddress(broker.getHost(), broker.getPort()));
+                    socket.write(Protocol.encodeTopicNotification(topic));
+                } catch (IOException e) {
+                    System.err.println("Failed to notify broker " + broker.getId() + " about topic creation: " + e.getMessage());
+                }
+            });
+        }
     }
 
     private Map<String, Map<Integer, Integer>> buildTopicLeaderMap() {
@@ -268,6 +302,7 @@ public class SimpleKafkaBroker {
             case Protocol.METADATA -> handleMetadataRequest(client);
             case Protocol.CREATE_TOPIC -> handleCreateTopicRequest(client, buffer);
             case Protocol.REPLICATE -> handleReplicateRequest(client, buffer);
+            case Protocol.TOPIC_NOTIFICATION -> handleTopicNotification(client, buffer);
             default -> Protocol.sendErrorResponse(client, "Unknown message type: " + type);
         }
     }
@@ -296,6 +331,16 @@ public class SimpleKafkaBroker {
         } catch (Exception e) {
             Protocol.sendErrorResponse(client, "Failed to create topic: " + e.getMessage());
         }
+    }
+
+    private void handleTopicNotification(SocketChannel client, ByteBuffer buffer) throws IOException {
+        short topicLen = buffer.getShort();
+        byte[] topicBytes = new byte[topicLen];
+        buffer.get(topicBytes);
+
+        String topic = new String(topicBytes);
+        System.out.println("Topic notification received: " + topic);
+        loadTopic(topic);
     }
 
     private void handleProduceRequest(SocketChannel client, ByteBuffer buffer) throws IOException {
@@ -331,7 +376,28 @@ public class SimpleKafkaBroker {
 
         PartitionMetadata metadata = partitionMap.get(partition);
         if (metadata.leader != brokerId) {
-            Protocol.sendErrorResponse(client, "Not leader for partition " + partition);
+            BrokerInfo leaderBroker = getBrokerInfo(metadata.leader);
+            if (leaderBroker == null) {
+                Protocol.sendErrorResponse(client, "Leader not available for partition " + partition);
+                return;
+            }
+
+            try (SocketChannel leaderSocket = SocketChannel.open()) {
+                leaderSocket.connect(new InetSocketAddress(leaderBroker.getHost(), leaderBroker.getPort()));
+                ByteBuffer forwardRequest = Protocol.encodeProduceRequest(topic, partition, message);
+                leaderSocket.write(forwardRequest);
+
+                ByteBuffer response = ByteBuffer.allocate(1024);
+                int bytesRead = leaderSocket.read(response);
+                if (bytesRead <= 0) {
+                    Protocol.sendErrorResponse(client, "No response from leader broker");
+                    return;
+                }
+                response.flip();
+                client.write(response);
+            } catch (IOException e) {
+                Protocol.sendErrorResponse(client, "Failed to forward to leader: " + e.getMessage());
+            }
             return;
         }
 
@@ -418,6 +484,16 @@ public class SimpleKafkaBroker {
                     socket.connect(new InetSocketAddress(followerBroker.getHost(), followerBroker.getPort()));
                     ByteBuffer request = Protocol.encodeReplicateRequest(topic, partition, offset, message);
                     socket.write(request);
+
+                    ByteBuffer response = ByteBuffer.allocate(1024);
+                    int bytesRead = socket.read(response);
+                    if (bytesRead > 0) {
+                        response.flip();
+                        Protocol.ProduceResult result = Protocol.decodeProduceResponse(response);
+                        if (result.error() != null) {
+                            System.err.println("Replication error to broker " + followerId + ": " + result.error());
+                        }
+                    }
                 } catch (IOException e) {
                     System.err.println("Replication failed to broker " + followerId + ": " + e.getMessage());
                 }
