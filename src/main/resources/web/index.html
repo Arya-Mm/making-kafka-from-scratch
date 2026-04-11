@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Simple Kafka Web UI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            max-width: 900px;
+        }
+        h1, h2 {
+            color: #1f2937;
+        }
+        section {
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 18px;
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-top: 8px;
+            font-weight: 600;
+        }
+        input, textarea, select {
+            width: 100%;
+            max-width: 400px;
+            padding: 8px;
+            margin-top: 4px;
+            border: 1px solid #94a3b8;
+            border-radius: 6px;
+        }
+        button {
+            margin-top: 14px;
+            padding: 10px 18px;
+            border: none;
+            background: #2563eb;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #1d4ed8;
+        }
+        pre {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+<h1>Simple Kafka Web UI</h1>
+
+<section>
+    <h2>Broker connection</h2>
+    <label>Bootstrap host</label>
+    <input id="host" type="text" value="localhost"/>
+    <label>Bootstrap port</label>
+    <input id="port" type="number" value="9092"/>
+    <button onclick="refreshMetadata()">Refresh metadata</button>
+</section>
+
+<section>
+    <h2>Create topic</h2>
+    <label>Topic name</label>
+    <input id="create-topic" type="text" placeholder="topic-name"/>
+    <label>Partitions</label>
+    <input id="create-partitions" type="number" value="1"/>
+    <label>Replication factor</label>
+    <input id="create-replication" type="number" value="1"/>
+    <button onclick="createTopic()">Create topic</button>
+</section>
+
+<section>
+    <h2>Produce message</h2>
+    <label>Topic</label>
+    <input id="produce-topic" type="text" placeholder="topic-name"/>
+    <label>Partition (optional)</label>
+    <input id="produce-partition" type="number" placeholder="0"/>
+    <label>Message</label>
+    <textarea id="produce-message" rows="3"></textarea>
+    <button onclick="produceMessage()">Send message</button>
+</section>
+
+<section>
+    <h2>Fetch messages</h2>
+    <label>Topic</label>
+    <input id="fetch-topic" type="text" placeholder="topic-name"/>
+    <label>Partition</label>
+    <input id="fetch-partition" type="number" value="0"/>
+    <label>Offset</label>
+    <input id="fetch-offset" type="number" value="0"/>
+    <label>Max messages</label>
+    <input id="fetch-max" type="number" value="10"/>
+    <button onclick="fetchMessages()">Fetch</button>
+</section>
+
+<section>
+    <h2>Output</h2>
+    <pre id="output">Ready.</pre>
+</section>
+
+<script>
+    function apiUrl(path) {
+        if (window.location.protocol === 'file:') {
+            return 'http://localhost:8080' + (path.startsWith('/') ? path : '/' + path);
+        }
+        return path;
+    }
+
+    async function request(path, options = {}) {
+        try {
+            const response = await fetch(apiUrl(path), options);
+            const text = await response.text();
+            let data = null;
+            try {
+                data = text ? JSON.parse(text) : null;
+            } catch (_) {
+                data = null;
+            }
+
+            if (!response.ok) {
+                return data || { error: response.status + ' ' + response.statusText };
+            }
+            return data;
+        } catch (err) {
+            return { error: err.message || 'Failed to fetch' };
+        }
+    }
+
+    function getHostPort() {
+        const host = document.getElementById("host").value.trim() || "localhost";
+        const port = document.getElementById("port").value.trim() || "9092";
+        return { host, port };
+    }
+
+    function showOutput(value) {
+        document.getElementById("output").textContent =
+            typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+
+    async function createTopic() {
+        const {host, port} = getHostPort();
+        const topic = document.getElementById("create-topic").value.trim();
+        const partitions = parseInt(document.getElementById("create-partitions").value, 10) || 1;
+        const replication = parseInt(document.getElementById("create-replication").value, 10) || 1;
+
+        showOutput("Creating topic...");
+        const result = await request("/api/create-topic", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({host, port, topic, partitions, replication})
+        });
+        showOutput(result);
+    }
+
+    async function produceMessage() {
+        const {host, port} = getHostPort();
+        const topic = document.getElementById("produce-topic").value.trim();
+        const partitionValue = document.getElementById("produce-partition").value.trim();
+        const message = document.getElementById("produce-message").value;
+
+        if (!topic) {
+            showOutput("Topic is required.");
+            return;
+        }
+        if (!message) {
+            showOutput("Message is required.");
+            return;
+        }
+
+        const body = {host, port, topic, message};
+        if (partitionValue !== "") {
+            body.partition = parseInt(partitionValue, 10);
+        }
+
+        showOutput("Sending message...");
+        const result = await request("/api/produce", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(body)
+        });
+        showOutput(result);
+    }
+
+    async function fetchMessages() {
+        const {host, port} = getHostPort();
+        const topic = document.getElementById("fetch-topic").value.trim();
+        const partition = parseInt(document.getElementById("fetch-partition").value, 10) || 0;
+        const offset = parseInt(document.getElementById("fetch-offset").value, 10) || 0;
+        const maxMessages = parseInt(document.getElementById("fetch-max").value, 10) || 10;
+
+        if (!topic) {
+            showOutput("Topic is required.");
+            return;
+        }
+
+        showOutput("Fetching messages...");
+        const query = new URLSearchParams({host, port, topic, partition, offset, maxMessages});
+        const result = await request("/api/fetch?" + query.toString());
+        showOutput(result);
+    }
+
+    async function refreshMetadata() {
+        const {host, port} = getHostPort();
+        showOutput("Refreshing metadata...");
+        const query = new URLSearchParams({host, port});
+        const result = await request("/api/metadata?" + query.toString());
+        showOutput(result);
+    }
+</script>
+</body>
+</html>

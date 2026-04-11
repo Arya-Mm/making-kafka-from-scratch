@@ -198,4 +198,12 @@ public class SimpleKafkaClient {
 
     public record TopicMetadata(String topic, Map<Integer, BrokerInfo> partitions) {
     }
+
+    public Map<String, TopicMetadata> topicMetadata() {
+        return Map.copyOf(topicMetadata);
+    }
+
+    public List<BrokerInfo> brokers() {
+        return List.copyOf(brokers.values());
+    }
 }
