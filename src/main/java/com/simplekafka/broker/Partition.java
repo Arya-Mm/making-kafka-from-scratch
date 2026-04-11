@@ -8,13 +8,15 @@ import java.util.concurrent.atomic.AtomicLong;
 public class Partition {
 
     private final File logFile;
-    private final AtomicLong offset = new AtomicLong(0);
+    private final AtomicLong nextOffset = new AtomicLong(0);
 
-    public Partition(String topic) {
-        File dir = new File("data");
-        if (!dir.exists()) dir.mkdir();
+    public Partition(String topic, int partitionId) {
+        File dir = new File("data" + File.separator + topic);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
 
-        this.logFile = new File(dir, topic + ".log");
+        this.logFile = new File(dir, partitionId + ".log");
         initializeOffset();
     }
 
@@ -30,7 +32,7 @@ public class Partition {
                 dis.skipBytes(length);
                 currentOffset++;
             }
-            offset.set(currentOffset);
+            nextOffset.set(currentOffset);
         } catch (IOException ignored) {
         }
     }
@@ -39,21 +41,28 @@ public class Partition {
         try (FileOutputStream fos = new FileOutputStream(logFile, true)) {
             fos.write(intToBytes(message.length));
             fos.write(message);
+            fos.flush();
         }
-        return offset.getAndIncrement();
+        return nextOffset.getAndIncrement();
+    }
+
+    public synchronized long append(byte[] message, long expectedOffset) throws IOException {
+        if (expectedOffset != nextOffset.get()) {
+            throw new IOException("Offset mismatch: expected=" + nextOffset.get() + " received=" + expectedOffset);
+        }
+        return append(message);
     }
 
     public synchronized List<byte[]> readFromOffset(long startOffset, int maxMessages) throws IOException {
         List<byte[]> result = new ArrayList<>();
 
-        if (!logFile.exists()) return result;
+        if (!logFile.exists()) {
+            return result;
+        }
 
         try (DataInputStream dis = new DataInputStream(new FileInputStream(logFile))) {
-
             long currentOffset = 0;
-
             while (dis.available() > 0 && result.size() < maxMessages) {
-
                 int length = dis.readInt();
                 byte[] message = new byte[length];
                 dis.readFully(message);
@@ -67,6 +76,10 @@ public class Partition {
         }
 
         return result;
+    }
+
+    public long getNextOffset() {
+        return nextOffset.get();
     }
 
     private byte[] intToBytes(int value) {

@@ -216,6 +216,10 @@ public class SimpleKafkaBroker {
             return;
         }
 
+        String topicPath = "/topics/" + topic;
+        zkClient.createPersistentNode(topicPath, "partitions=" + numPartitions + ",replication=" + replicationFactor);
+        zkClient.createPersistentNode(topicPath + "/partitions", "");
+
         List<BrokerInfo> brokers = zkClient.getAllBrokerInfo();
         if (brokers.isEmpty()) {
             brokers = List.of(new BrokerInfo(brokerId, host, port));
@@ -236,9 +240,9 @@ public class SimpleKafkaBroker {
 
             metadata.put(partition, new PartitionMetadata(leader.getId(), followers));
             storePartitionState(topic, partition, leader.getId(), followers);
+            watchPartitionState(topic, partition);
         }
 
-        zkClient.createPersistentNode("/topics/" + topic, "partitions=" + numPartitions + ",replication=" + replicationFactor);
         topics.put(topic, manager);
         topicMetadata.put(topic, metadata);
 
@@ -382,6 +386,10 @@ public class SimpleKafkaBroker {
         buffer.get(message);
 
         if (!topicMetadata.containsKey(topic)) {
+            loadTopic(topic);
+        }
+
+        if (!topicMetadata.containsKey(topic)) {
             if (isController) {
                 try {
                     createTopic(topic, Math.max(1, partition + 1), (short) 1);
@@ -473,10 +481,14 @@ public class SimpleKafkaBroker {
 
         String topic = new String(topicBytes);
         int partition = buffer.getInt();
-        buffer.getLong();
+        long offset = buffer.getLong();
         int messageLength = buffer.getInt();
         byte[] message = new byte[messageLength];
         buffer.get(message);
+
+        if (!topics.containsKey(topic)) {
+            loadTopic(topic);
+        }
 
         if (!topics.containsKey(topic)) {
             Protocol.sendErrorResponse(client, "Unknown topic: " + topic);
@@ -489,8 +501,12 @@ public class SimpleKafkaBroker {
             return;
         }
 
-        long offset = partitionLog.append(message);
-        client.write(Protocol.encodeProduceResponse(offset));
+        try {
+            long writtenOffset = partitionLog.append(message, offset);
+            client.write(Protocol.encodeProduceResponse(writtenOffset));
+        } catch (IOException e) {
+            Protocol.sendErrorResponse(client, "Replication failed: " + e.getMessage());
+        }
     }
 
     private void replicateToFollowers(String topic, int partition, byte[] message, long offset) {
