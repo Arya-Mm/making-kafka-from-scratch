@@ -1,7 +1,9 @@
 package com.simplekafka.client;
 
+import com.simplekafka.broker.Protocol;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -29,13 +31,30 @@ public class SimpleKafkaConsumer {
     }
 
     public List<byte[]> poll() throws IOException {
-        List<byte[]> messages = client.fetch(topic, partition, currentOffset, 10);
+        List<Protocol.FetchMessage> records =
+                client.fetchWithOffsets(topic, partition, currentOffset, 10);
 
-        if (!messages.isEmpty()) {
-            currentOffset += messages.size();
+        List<byte[]> messages = new ArrayList<>(records.size());
+        for (Protocol.FetchMessage record : records) {
+            messages.add(record.getMessage());
+        }
+
+        if (!records.isEmpty()) {
+            currentOffset = records.get(records.size() - 1).getOffset() + 1;
         }
 
         return messages;
+    }
+
+    public java.util.List<Protocol.FetchMessage> pollWithOffsets() throws IOException {
+        List<Protocol.FetchMessage> records =
+                client.fetchWithOffsets(topic, partition, currentOffset, 10);
+
+        if (!records.isEmpty()) {
+            currentOffset = records.get(records.size() - 1).getOffset() + 1;
+        }
+
+        return records;
     }
 
     public void startConsuming(MessageHandler handler) {
@@ -43,10 +62,9 @@ public class SimpleKafkaConsumer {
             consumerThread = new Thread(() -> {
                 while (running.get()) {
                     try {
-                        List<byte[]> messages = poll();
-                        long startOffset = currentOffset - messages.size();
-                        for (int i = 0; i < messages.size(); i++) {
-                            handler.handle(messages.get(i), startOffset + i);
+                        List<Protocol.FetchMessage> messages = pollWithOffsets();
+                        for (Protocol.FetchMessage message : messages) {
+                            handler.handle(message.getMessage(), message.getOffset());
                         }
 
                         if (messages.isEmpty()) {

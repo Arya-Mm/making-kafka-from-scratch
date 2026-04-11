@@ -60,11 +60,12 @@ public class TestClient {
             System.out.println("Fetched messages:");
 
             for (int i = 0; i < count; i++) {
+                long offset = fetchResponse.getLong();
                 int len = fetchResponse.getInt();
                 byte[] msg = new byte[len];
                 fetchResponse.get(msg);
 
-                System.out.println(new String(msg));
+                System.out.println("offset=" + offset + " message=" + new String(msg));
             }
         }
 
