@@ -169,7 +169,9 @@ public class SimpleKafkaBroker {
                 String followerPart = part.substring(part.indexOf('=') + 1);
                 if (!followerPart.isBlank()) {
                     for (String followerId : followerPart.split(";")) {
-                        followers.add(Integer.parseInt(followerId));
+                        if (!followerId.isBlank()) {
+                            followers.add(Integer.parseInt(followerId));
+                        }
                     }
                 }
             }
@@ -476,6 +478,7 @@ public class SimpleKafkaBroker {
         for (int followerId : metadata.followers) {
             BrokerInfo followerBroker = getBrokerInfo(followerId);
             if (followerBroker == null) {
+                System.err.println("Follower broker metadata unavailable for id: " + followerId);
                 continue;
             }
 
@@ -487,15 +490,17 @@ public class SimpleKafkaBroker {
 
                     ByteBuffer response = ByteBuffer.allocate(1024);
                     int bytesRead = socket.read(response);
-                    if (bytesRead > 0) {
-                        response.flip();
-                        Protocol.ProduceResult result = Protocol.decodeProduceResponse(response);
-                        if (result.error() != null) {
-                            System.err.println("Replication error to broker " + followerId + ": " + result.error());
-                        }
+                    if (bytesRead <= 0) {
+                        System.err.println("No replication ack from follower " + followerId);
+                        return;
+                    }
+                    response.flip();
+                    Protocol.ProduceResult result = Protocol.decodeProduceResponse(response);
+                    if (result.error() != null) {
+                        System.err.println("Replication failed for follower " + followerId + ": " + result.error());
                     }
                 } catch (IOException e) {
-                    System.err.println("Replication failed to broker " + followerId + ": " + e.getMessage());
+                    System.err.println("Replication exception to follower " + followerId + ": " + e.getMessage());
                 }
             });
         }
