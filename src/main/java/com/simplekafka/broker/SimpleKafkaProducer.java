@@ -19,17 +19,16 @@ public class SimpleKafkaProducer {
         client.initialize();
     }
 
-    // Send to random partition
     public long send(String message) throws IOException {
 
-        int partition = random.nextInt(3); // simple assumption
+        int partitionCount = client.getPartitionCount(topic);
+        int partition = partitionCount > 0 ? random.nextInt(partitionCount) : 0;
 
         byte[] data = message.getBytes(StandardCharsets.UTF_8);
 
         return client.send(topic, partition, data);
     }
 
-    // Send to specific partition
     public long send(String message, int partition) throws IOException {
 
         byte[] data = message.getBytes(StandardCharsets.UTF_8);

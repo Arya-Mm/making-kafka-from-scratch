@@ -1,9 +1,13 @@
 package com.simplekafka.broker;
 
+import com.simplekafka.client.SimpleKafkaConsumer;
+import com.simplekafka.client.SimpleKafkaProducer;
+
+import java.nio.charset.StandardCharsets;
+
 public class ProducerConsumerTest {
 
     public static void main(String[] args) throws Exception {
-
         SimpleKafkaProducer producer =
                 new SimpleKafkaProducer("localhost", 9092, "test");
 
@@ -19,8 +23,11 @@ public class ProducerConsumerTest {
 
         consumer.initialize();
 
-        consumer.startConsuming(message -> {
-            System.out.println("Consumed: " + message);
+        consumer.startConsuming((message, offset) -> {
+            System.out.println("Consumed offset " + offset + ": " + new String(message, StandardCharsets.UTF_8));
         });
+
+        Thread.sleep(5000);
+        consumer.stop();
     }
 }

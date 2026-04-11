@@ -15,6 +15,24 @@ public class Partition {
         if (!dir.exists()) dir.mkdir();
 
         this.logFile = new File(dir, topic + ".log");
+        initializeOffset();
+    }
+
+    private void initializeOffset() {
+        if (!logFile.exists()) {
+            return;
+        }
+
+        try (DataInputStream dis = new DataInputStream(new FileInputStream(logFile))) {
+            long currentOffset = 0;
+            while (dis.available() > 0) {
+                int length = dis.readInt();
+                dis.skipBytes(length);
+                currentOffset++;
+            }
+            offset.set(currentOffset);
+        } catch (IOException ignored) {
+        }
     }
 
     public synchronized long append(byte[] message) throws IOException {
@@ -52,11 +70,11 @@ public class Partition {
     }
 
     private byte[] intToBytes(int value) {
-        return new byte[] {
-                (byte)(value >> 24),
-                (byte)(value >> 16),
-                (byte)(value >> 8),
-                (byte)value
+        return new byte[]{
+                (byte) (value >> 24),
+                (byte) (value >> 16),
+                (byte) (value >> 8),
+                (byte) value
         };
     }
 }
