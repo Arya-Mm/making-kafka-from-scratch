@@ -38,7 +38,7 @@ public class ZookeeperClient implements Watcher {
         createPath("/brokers");
         createPath("/brokers/ids");
         createPath("/topics");
-        createPath("/controller");
+        // remove /controller persistent path creation so controller can be elected
     }
 
     // ================= WATCHER =================
@@ -103,15 +103,25 @@ public class ZookeeperClient implements Watcher {
     // ================= EPHEMERAL =================
     public boolean createEphemeralNode(String path, String data) {
         try {
-            if (zooKeeper.exists(path, false) == null) {
-
+            Stat stat = zooKeeper.exists(path, false);
+            if (stat == null) {
                 zooKeeper.create(
                         path,
                         data.getBytes(),
                         ZooDefs.Ids.OPEN_ACL_UNSAFE,
                         CreateMode.EPHEMERAL
                 );
+                return true;
+            }
 
+            if (stat.getEphemeralOwner() == 0) {
+                zooKeeper.delete(path, -1);
+                zooKeeper.create(
+                        path,
+                        data.getBytes(),
+                        ZooDefs.Ids.OPEN_ACL_UNSAFE,
+                        CreateMode.EPHEMERAL
+                );
                 return true;
             }
         } catch (Exception ignored) {
