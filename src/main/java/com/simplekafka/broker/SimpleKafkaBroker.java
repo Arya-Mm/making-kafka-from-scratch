@@ -144,6 +144,7 @@ public class SimpleKafkaBroker {
                 int pid = Integer.parseInt(partitionId);
                 String state = zkClient.getData(partitionPath + "/" + partitionId + "/state");
                 partitionMetadata.put(pid, parsePartitionState(state));
+                watchPartitionState(topic, pid);
             }
 
             topicMetadata.put(topic, partitionMetadata);
@@ -151,6 +152,22 @@ public class SimpleKafkaBroker {
         } catch (Exception e) {
             System.err.println("Failed to load topic metadata for " + topic + ": " + e.getMessage());
         }
+    }
+
+    private void watchPartitionState(String topic, int partition) {
+        String statePath = "/topics/" + topic + "/partitions/" + partition + "/state";
+        zkClient.watchNode(statePath, () -> {
+            try {
+                String state = zkClient.getData(statePath);
+                Map<Integer, PartitionMetadata> partitionMap = topicMetadata.get(topic);
+                if (partitionMap != null) {
+                    partitionMap.put(partition, parsePartitionState(state));
+                    System.out.println("Reloaded partition state for " + topic + "-" + partition + ": " + state);
+                }
+            } catch (Exception e) {
+                System.err.println("Failed to reload partition state for " + topic + "-" + partition + ": " + e.getMessage());
+            }
+        });
     }
 
     private PartitionMetadata parsePartitionState(String state) {
@@ -163,14 +180,22 @@ public class SimpleKafkaBroker {
         List<Integer> followers = new ArrayList<>();
 
         for (String part : state.split(",")) {
-            if (part.startsWith("leader=")) {
-                leader = Integer.parseInt(part.substring(part.indexOf('=') + 1));
-            } else if (part.startsWith("followers=")) {
-                String followerPart = part.substring(part.indexOf('=') + 1);
+            String trimmed = part.trim();
+            if (trimmed.startsWith("leader=")) {
+                String value = trimmed.substring("leader=".length()).trim();
+                try {
+                    leader = Integer.parseInt(value);
+                } catch (NumberFormatException ignored) {
+                }
+            } else if (trimmed.startsWith("followers=")) {
+                String followerPart = trimmed.substring("followers=".length()).trim();
                 if (!followerPart.isBlank()) {
                     for (String followerId : followerPart.split(";")) {
                         if (!followerId.isBlank()) {
-                            followers.add(Integer.parseInt(followerId));
+                            try {
+                                followers.add(Integer.parseInt(followerId.trim()));
+                            } catch (NumberFormatException ignored) {
+                            }
                         }
                     }
                 }
@@ -423,6 +448,10 @@ public class SimpleKafkaBroker {
         buffer.get(groupBytes);
 
         if (!topics.containsKey(topic)) {
+            loadTopic(topic);
+        }
+
+        if (!topics.containsKey(topic)) {
             Protocol.sendErrorResponse(client, "Unknown topic: " + topic);
             return;
         }
@@ -485,8 +514,7 @@ public class SimpleKafkaBroker {
             executor.submit(() -> {
                 try (SocketChannel socket = SocketChannel.open()) {
                     socket.connect(new InetSocketAddress(followerBroker.getHost(), followerBroker.getPort()));
-                    ByteBuffer request = Protocol.encodeReplicateRequest(topic, partition, offset, message);
-                    socket.write(request);
+                    socket.write(Protocol.encodeReplicateRequest(topic, partition, offset, message));
 
                     ByteBuffer response = ByteBuffer.allocate(1024);
                     int bytesRead = socket.read(response);
@@ -498,6 +526,8 @@ public class SimpleKafkaBroker {
                     Protocol.ProduceResult result = Protocol.decodeProduceResponse(response);
                     if (result.error() != null) {
                         System.err.println("Replication failed for follower " + followerId + ": " + result.error());
+                    } else {
+                        System.out.println("Replicated offset " + offset + " to follower " + followerId);
                     }
                 } catch (IOException e) {
                     System.err.println("Replication exception to follower " + followerId + ": " + e.getMessage());
